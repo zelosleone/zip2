@@ -848,7 +848,7 @@ impl<R: Read + Seek> ZipArchive<R> {
         use std::fs;
 
         create_dir_all(&directory)?;
-        let directory = directory.as_ref().canonicalize()?;
+        let directory = dunce::canonicalize(directory.as_ref())?;
 
         let root_dir = root_dir_filter
             .and_then(|filter| {
@@ -880,8 +880,7 @@ impl<R: Read + Seek> ZipArchive<R> {
         for i in 0..self.len() {
             let mut file = self.by_index(i)?;
 
-            let mut outpath = directory.clone();
-            file.safe_prepare_path(directory.as_ref(), &mut outpath, root_dir.as_ref())?;
+            let outpath = file.safe_prepare_path(&directory, root_dir.as_ref())?;
 
             let symlink_target = if file.is_symlink() && (cfg!(unix) || cfg!(windows)) {
                 let mut target = Vec::with_capacity(file.size() as usize);
@@ -1595,21 +1594,27 @@ impl<'a, R: Read> ZipFile<'a, R> {
     pub(crate) fn safe_prepare_path(
         &self,
         base_path: &Path,
-        outpath: &mut PathBuf,
         root_dir: Option<&(Vec<&OsStr>, impl RootDirFilter)>,
-    ) -> ZipResult<()> {
+    ) -> ZipResult<PathBuf> {
+        let mut outpath = base_path.to_path_buf();
         let components = self
             .simplified_components()
             .ok_or(invalid!("Invalid file path"))?;
 
         let components = match root_dir {
-            Some((root_dir, filter)) => match components.strip_prefix(&**root_dir) {
-                Some(components) => components,
+            Some((root_dir, filter)) => {
+                let root_dir_components: Vec<&OsStr> = root_dir.iter().copied().collect();
+                let components_slice: Option<Vec<&OsStr>> = components.iter()
+                    .take(root_dir_components.len())
+                    .map(|c| Some(*c))
+                    .collect();
+                match components_slice.map(|slice| slice == root_dir_components).unwrap_or(false) {
+                    true => &components[root_dir_components.len()..],
 
-                // In this case, we expect that the file was not in the root
-                // directory, but was filtered out when searching for the
-                // root directory.
-                None => {
+                    // In this case, we expect that the file was not in the root
+                    // directory, but was filtered out when searching for the
+                    // root directory.
+                    false => {
                     // We could technically find ourselves at this code
                     // path if the user provides an unstable or
                     // non-deterministic `filter` function.
@@ -1625,7 +1630,8 @@ impl<'a, R: Read> ZipFile<'a, R> {
                     // Extract as-is.
                     &components[..]
                 }
-            },
+            }}
+
 
             None => &components[..],
         };
@@ -1699,7 +1705,7 @@ impl<'a, R: Read> ZipFile<'a, R> {
                 outpath.push(target);
             }
         }
-        Ok(())
+        Ok(outpath)
     }
 
     /// Get the comment of the file

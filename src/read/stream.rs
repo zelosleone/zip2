@@ -64,8 +64,7 @@ impl<R: Read> ZipStreamReader<R> {
         impl ZipStreamVisitor for Extractor {
             fn visit_file<R: Read>(&mut self, file: &mut ZipFile<'_, R>) -> ZipResult<()> {
                 self.1.insert(file.name().into(), ());
-                let mut outpath = self.0.clone();
-                file.safe_prepare_path(&self.0, &mut outpath, None::<&(_, fn(&Path) -> bool)>)?;
+                let outpath = file.safe_prepare_path(&self.0, None::<&(_, fn(&Path) -> bool)>)?;
 
                 if file.is_symlink() {
                     let mut target = Vec::with_capacity(file.size() as usize);
